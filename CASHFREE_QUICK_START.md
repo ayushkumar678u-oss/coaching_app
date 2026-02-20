@@ -8,9 +8,9 @@ Your frontend has been successfully updated with Cashfree payment gateway integr
 
 1. **PaymentModal.jsx Updated** ✅
    - Added Cashfree SDK loader
-   - Added payment method selector (Razorpay/Cashfree)
+   - Removed Razorpay completely
    - Implemented `startCashfreePayment()` function
-   - Users can now choose between Razorpay and Cashfree
+   - Cashfree is now the only payment method
 
 2. **Documentation Created** ✅
    - `CASHFREE_SETUP.md` - Complete setup guide
@@ -91,8 +91,7 @@ Frontend/
 ## 💡 Key Features
 
 ### Frontend Features
-- ✅ Dual payment gateway support (Razorpay & Cashfree)
-- ✅ User-friendly payment method selector
+- ✅ Cashfree payment gateway integration
 - ✅ Real-time status updates
 - ✅ Error handling
 - ✅ Sandbox environment support

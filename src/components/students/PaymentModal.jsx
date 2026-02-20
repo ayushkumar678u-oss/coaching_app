@@ -1,16 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 
-// Load Razorpay SDK
-const loadRazorpayScript = () => {
-  return new Promise((resolve) => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-};
-
 // Load Cashfree SDK
 const loadCashfreeScript = () => {
   return new Promise((resolve) => {
@@ -185,197 +174,10 @@ const PaymentModal = ({
   onClose = () => {},
   onSuccess = () => {},
 }) => {
-  const [method, setMethod] = useState('razorpay');
   const [processing, setProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [sessionId, setSessionId] = useState(null);
-
-  const startPayment = async () => {
-    console.log('=== startPayment called (Razorpay) ===');
-    console.log('BASE_URL:', BASE_URL);
-    console.log('amount:', amount, 'courseId:', courseId);
-    console.log('token:', token());
-    
-    setProcessing(true);
-    setErrorMsg('');
-    setStatusMsg('Creating order…');
-
-    try {
-      /* Step 1: Create order on backend */
-      console.log('Creating order at:', `${BASE_URL}/api/payments/create`);
-      
-      const createRes = await fetch(`${BASE_URL}/api/payments/create`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          courseId: courseId ? parseInt(courseId) : null,
-          amount: parseFloat(amount),
-          currency: 'INR',
-        }),
-      });
-
-      console.log('Response status:', createRes.status);
-      const createJson = await createRes.json();
-      console.log('Response JSON:', createJson);
-      
-      if (!createJson.success) throw new Error(createJson.message || 'Order creation failed');
-
-      const { razorpay_order_id, razorpay_key, amount: orderAmount, currency, is_mock } = createJson.data;
-      console.log('Extracted:', { razorpay_order_id, razorpay_key, is_mock });
-      if (!razorpay_order_id) throw new Error('Missing order ID from server');
-      
-      console.log('Order created:', razorpay_order_id, 'Mock Mode:', is_mock);
-
-      /* Step 2: Handle Mock Mode (No Real Razorpay Keys) */
-      if (is_mock) {
-        console.log('✅ Mock mode: Auto-verifying payment');
-        setStatusMsg('Simulating payment (Development Mode)…');
-        
-        // Simulate payment delay
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        // Verify payment in mock mode
-        const mockSignature = 'mock_signature_' + Date.now();
-        console.log('Mock verifying with signature:', mockSignature);
-        
-        const verifyRes = await fetch(`${BASE_URL}/api/payments/verify`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            razorpay_order_id: razorpay_order_id,
-            razorpay_payment_id: 'mock_pay_' + Date.now(),
-            razorpay_signature: mockSignature,
-            courseId: courseId ? parseInt(courseId) : null,
-            amount: parseFloat(amount),
-          }),
-        });
-
-        const verifyJson = await verifyRes.json();
-        console.log('Mock verify response:', verifyJson);
-        
-        if (!verifyJson.success) {
-          throw new Error(verifyJson.message || 'Mock verification failed');
-        }
-
-        console.log('✅ Mock payment verified successfully');
-        setProcessing(false);
-        setStatusMsg('');
-        
-        /* Call success handler with payment ID */
-        const mockPaymentId = 'mock_pay_' + Date.now();
-        onSuccess({
-          courseId: courseId ? parseInt(courseId) : null,
-          amount: parseFloat(amount),
-          paymentMethod: 'razorpay-mock',
-          transactionId: mockPaymentId,
-          paymentId: verifyJson.data?.payment_id,
-          status: 'success',
-        });
-        onClose();
-        return;
-      }
-
-      /* Step 3: Load Razorpay SDK for Real Payment */
-      console.log('Loading Razorpay SDK for real payment...');
-      setStatusMsg('Initializing secure checkout…');
-      
-      const razorpayLoaded = await loadRazorpayScript();
-      if (!razorpayLoaded) {
-        throw new Error('Failed to load Razorpay. Please check your internet connection.');
-      }
-      console.log('Razorpay SDK loaded');
-
-      /* Step 4: Open Razorpay Checkout */
-      setStatusMsg('Opening secure checkout…');
-      
-      const options = {
-        key: razorpay_key,
-        order_id: razorpay_order_id,
-        amount: orderAmount,
-        currency: currency,
-        name: 'Coaching Platform',
-        description: `Course ID: ${courseId}`,
-        handler: async (response) => {
-          console.log('✅ Razorpay payment successful:', response);
-          
-          /* Step 5: Verify payment on backend */
-          setStatusMsg('Verifying payment…');
-          try {
-            const verifyRes = await fetch(`${BASE_URL}/api/payments/verify`, {
-              method: 'POST',
-              headers: authHeaders(),
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                courseId: courseId ? parseInt(courseId) : null,
-                amount: parseFloat(amount),
-              }),
-            });
-
-            const verifyJson = await verifyRes.json();
-            console.log('Verify response:', verifyJson);
-            
-            if (!verifyJson.success) {
-              throw new Error(verifyJson.message || 'Payment verification failed');
-            }
-
-            console.log('✅ Payment verified successfully');
-            setProcessing(false);
-            setStatusMsg('');
-            
-            /* Step 6: Call success handler with payment ID for invoice */
-            onSuccess({
-              courseId: courseId ? parseInt(courseId) : null,
-              amount: parseFloat(amount),
-              paymentMethod: 'razorpay',
-              transactionId: response.razorpay_payment_id,
-              paymentId: verifyJson.data?.payment_id,
-              status: 'success',
-            });
-            onClose();
-          } catch (verifyError) {
-            console.error('❌ Verification error:', verifyError);
-            setProcessing(false);
-            setStatusMsg('');
-            setErrorMsg(`Payment succeeded but verification failed: ${verifyError.message}. Contact support with ID: ${response.razorpay_payment_id}`);
-          }
-        },
-        prefill: {
-          email: localStorage.getItem('userEmail') || '',
-          contact: localStorage.getItem('userPhone') || '',
-        },
-        theme: {
-          color: '#4f46e5',
-        },
-        modal: {
-          ondismiss: () => {
-            console.log('Razorpay modal closed');
-            setProcessing(false);
-            setStatusMsg('');
-            setErrorMsg('Payment cancelled');
-          },
-        },
-      };
-
-      const razorpay = new window.Razorpay(options);
-      razorpay.open();
-
-    } catch (e) {
-      console.error('❌ Payment error:', e);
-      setProcessing(false);
-      setStatusMsg('');
-      if (e.message !== 'Payment cancelled by user') {
-        setErrorMsg(e.message || 'Something went wrong. Please try again.');
-      }
-    }
-  };
-
-  useEffect(() => {
-    // Cleanup on unmount
-    return () => {};
-  }, []);
 
   const startCashfreePayment = async () => {
     console.log('=== startCashfreePayment called ===');
@@ -461,7 +263,7 @@ const PaymentModal = ({
       });
 
     } catch (e) {
-      console.error('❌ Cashfree Payment error:', e);
+      console.error('❌ Payment error:', e);
       setProcessing(false);
       setStatusMsg('');
       if (e.message !== 'Payment cancelled by user') {
@@ -469,6 +271,11 @@ const PaymentModal = ({
       }
     }
   };
+
+  useEffect(() => {
+    // Cleanup on unmount
+    return () => {};
+  }, []);
 
   return (
     <div
@@ -501,25 +308,10 @@ const PaymentModal = ({
             </div>
           </div>
 
-          {/* Payment Method - Razorpay & Cashfree */}
+          {/* Payment Method - Cashfree Only */}
           <div className="pm-section-label">Payment Gateway</div>
           <div className="pm-method-grid">
-            <div
-              className={`pm-method ${method === 'razorpay' ? 'selected' : ''}`}
-              onClick={() => setMethod('razorpay')}
-            >
-              <div className="pm-method-icon">💳</div>
-              <div className="pm-method-info">
-                <div className="pm-method-name">Razorpay</div>
-                <div className="pm-method-desc">Cards, UPI, Wallets, NetBanking</div>
-              </div>
-              <div className="pm-method-check">✓</div>
-            </div>
-
-            <div
-              className={`pm-method ${method === 'cashfree' ? 'selected' : ''}`}
-              onClick={() => setMethod('cashfree')}
-            >
+            <div className="pm-method selected" style={{ cursor: 'default' }}>
               <div className="pm-method-icon">🪙</div>
               <div className="pm-method-info">
                 <div className="pm-method-name">Cashfree</div>
@@ -543,7 +335,7 @@ const PaymentModal = ({
           )}
           {!statusMsg && !errorMsg && (
             <div className="pm-status-box info" style={{ fontSize: '12px', fontWeight: '500' }}>
-              🔒 Secure payment powered by Razorpay
+              🔒 Secure payment powered by Cashfree
             </div>
           )}
 
@@ -559,12 +351,8 @@ const PaymentModal = ({
             <button
               className="pm-btn-pay"
               onClick={() => {
-                console.log('Pay button clicked with method:', method);
-                if (method === 'razorpay') {
-                  startPayment();
-                } else if (method === 'cashfree') {
-                  startCashfreePayment();
-                }
+                console.log('Pay button clicked');
+                startCashfreePayment();
               }}
               disabled={processing}
             >
@@ -575,9 +363,9 @@ const PaymentModal = ({
             </button>
           </div>
 
-          {/* Razorpay badge */}
+          {/* Security badge */}
           <div className="pm-badge">
-            🔒 Your payment is secure and encrypted
+            🔒 Secure payment powered by Cashfree
           </div>
         </div>
 

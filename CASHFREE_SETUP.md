@@ -2,7 +2,7 @@
 
 ## Frontend Setup Complete ✅
 
-The frontend has been updated with Cashfree payment gateway integration alongside Razorpay.
+The frontend has been updated with Cashfree payment gateway integration.
 
 ## Required Backend Endpoints
 
@@ -279,10 +279,7 @@ BACKEND_URL=https://yourbackend.com
 
 The `PaymentModal.jsx` component now supports:
 
-1. **Razorpay** - Original payment gateway
-2. **Cashfree** - New payment gateway with Sandbox environment
-
-Users can select their preferred payment method before checkout.
+1. **Cashfree** - Secure payment gateway with Sandbox environment
 
 ## Testing Sandbox Payment
 
