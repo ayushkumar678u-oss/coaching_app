@@ -11,6 +11,17 @@ const loadRazorpayScript = () => {
   });
 };
 
+// Load Cashfree SDK
+const loadCashfreeScript = () => {
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://sdk.cashfree.com/js/cashfree.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
+
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap');
 
@@ -178,6 +189,7 @@ const PaymentModal = ({
   const [processing, setProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [sessionId, setSessionId] = useState(null);
 
   const startPayment = async () => {
     console.log('=== startPayment called (Razorpay) ===');
@@ -365,6 +377,99 @@ const PaymentModal = ({
     return () => {};
   }, []);
 
+  const startCashfreePayment = async () => {
+    console.log('=== startCashfreePayment called ===');
+    console.log('BASE_URL:', BASE_URL);
+    console.log('amount:', amount, 'courseId:', courseId);
+    console.log('token:', token());
+    
+    setProcessing(true);
+    setErrorMsg('');
+    setStatusMsg('Initializing Cashfree…');
+
+    try {
+      /* Step 1: Create Cashfree order on backend */
+      console.log('Creating Cashfree order at:', `${BASE_URL}/api/payments/cashfree/create`);
+      
+      const createRes = await fetch(`${BASE_URL}/api/payments/cashfree/create`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          courseId: courseId ? parseInt(courseId) : null,
+          amount: parseFloat(amount),
+          currency: 'INR',
+        }),
+      });
+
+      console.log('Response status:', createRes.status);
+      const createJson = await createRes.json();
+      console.log('Response JSON:', createJson);
+      
+      if (!createJson.success) throw new Error(createJson.message || 'Order creation failed');
+
+      const { session_id, order_id, cashfree_key } = createJson.data;
+      console.log('Extracted:', { session_id, order_id, cashfree_key });
+      
+      if (!session_id) throw new Error('Missing session ID from server');
+      
+      console.log('Order created:', order_id);
+
+      setSessionId(session_id);
+
+      /* Step 2: Load Cashfree SDK */
+      setStatusMsg('Loading secure checkout…');
+      const cashfreeLoaded = await loadCashfreeScript();
+      if (!cashfreeLoaded) {
+        throw new Error('Failed to load Cashfree SDK. Please check your internet connection.');
+      }
+      console.log('Cashfree SDK loaded');
+
+      /* Step 3: Initialize Cashfree Checkout */
+      setStatusMsg('Opening Cashfree checkout…');
+      
+      if (!window.Cashfree) {
+        throw new Error('Cashfree SDK not available');
+      }
+
+      // Initialize Cashfree SDK
+      window.Cashfree.setPublicKey(cashfree_key);
+
+      // Create checkout options
+      const checkoutOptions = {
+        paymentSessionId: session_id,
+        redirectTarget: '_self',
+      };
+
+      // Open Cashfree checkout modal
+      window.Cashfree.checkout(checkoutOptions).then((response) => {
+        console.log('Cashfree response:', response);
+        
+        if (response.error) {
+          throw new Error('Payment failed: ' + response.error.message);
+        }
+
+        if (response.redirect) {
+          /* Redirect to payment page or success page */
+          console.log('Redirecting to:', response.redirect);
+          window.location.href = response.redirect;
+        }
+      }).catch((error) => {
+        console.error('Cashfree error:', error);
+        setProcessing(false);
+        setStatusMsg('');
+        setErrorMsg(error.message || 'Payment failed');
+      });
+
+    } catch (e) {
+      console.error('❌ Cashfree Payment error:', e);
+      setProcessing(false);
+      setStatusMsg('');
+      if (e.message !== 'Payment cancelled by user') {
+        setErrorMsg(e.message || 'Something went wrong. Please try again.');
+      }
+    }
+  };
+
   return (
     <div
       className="pm-overlay"
@@ -396,14 +501,29 @@ const PaymentModal = ({
             </div>
           </div>
 
-          {/* Payment Method - Razorpay Only */}
+          {/* Payment Method - Razorpay & Cashfree */}
           <div className="pm-section-label">Payment Gateway</div>
           <div className="pm-method-grid">
-            <div className="pm-method selected" style={{ cursor: 'default' }}>
+            <div
+              className={`pm-method ${method === 'razorpay' ? 'selected' : ''}`}
+              onClick={() => setMethod('razorpay')}
+            >
               <div className="pm-method-icon">💳</div>
               <div className="pm-method-info">
                 <div className="pm-method-name">Razorpay</div>
                 <div className="pm-method-desc">Cards, UPI, Wallets, NetBanking</div>
+              </div>
+              <div className="pm-method-check">✓</div>
+            </div>
+
+            <div
+              className={`pm-method ${method === 'cashfree' ? 'selected' : ''}`}
+              onClick={() => setMethod('cashfree')}
+            >
+              <div className="pm-method-icon">🪙</div>
+              <div className="pm-method-info">
+                <div className="pm-method-name">Cashfree</div>
+                <div className="pm-method-desc">Secure & Fast Checkout</div>
               </div>
               <div className="pm-method-check">✓</div>
             </div>
@@ -439,8 +559,12 @@ const PaymentModal = ({
             <button
               className="pm-btn-pay"
               onClick={() => {
-                console.log('Pay button clicked');
-                startPayment();
+                console.log('Pay button clicked with method:', method);
+                if (method === 'razorpay') {
+                  startPayment();
+                } else if (method === 'cashfree') {
+                  startCashfreePayment();
+                }
               }}
               disabled={processing}
             >
